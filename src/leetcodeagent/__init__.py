@@ -1,28 +1,19 @@
-import re
-
 from .agent import LeetcodeAgent
 from .config import settings
 
 from rich.console import Console
-from rich.prompt import Confirm, Prompt
+# from rich.markdown import Markdown
+from rich.prompt import Confirm
 
 EXIT_COMMANDS = {"exit", "quit", "q"}
 
 console = Console()
 
-def _wants_problem_recommendation(question: str) -> bool:
-    """Recognize requests to pick a LeetCode practice problem."""
-    if not re.search(r"\b(problems?|questions?)\b", question, re.IGNORECASE):
-        return False
-    if re.search(r"\b(solved|completed|history|progress|stats|review)\b", question, re.IGNORECASE):
-        return False
-    return bool(
-        re.search(
-            r"\b(random|recommend|suggest|pick|choose|practice|give|show|find|want|need)\b",
-            question,
-            re.IGNORECASE,
-        )
-    )
+
+# def _print_coach_answer(answer: str, output: Console = console) -> None:
+#     """Render the model's Markdown formatting in the terminal."""
+#     output.print("\n[bold green]Coach:[/]")
+#     output.print(Markdown(answer))
 
 
 def main() -> None:
@@ -60,20 +51,9 @@ def main() -> None:
             return
 
         try:
-            if _wants_problem_recommendation(question):
-                difficulty = Prompt.ask(
-                    "[bold cyan]Choose difficulty[/bold cyan]",
-                    choices=["easy", "medium", "hard"],
-                    case_sensitive=False,
-                    console=console,
-                )
-                question = (
-                    f"{question}\n\nDifficulty selected in the menu: {difficulty}. "
-                    "Recommend one random problem at this difficulty."
-                )
-
             with status:
                 answer = agent.ask(question)
+            # _print_coach_answer(answer)
             console.print("\n[bold green]Coach:[/]", answer)
         except (EOFError, KeyboardInterrupt):
             console.print("\nBye!")

@@ -20,6 +20,18 @@ class MemoryStore:
         contents = self.path.read_text(encoding="utf-8").strip()
         return contents or "(memory.md is currently empty.)"
 
+    def solved_numbers(self) -> set[int]:
+        """Read solved problem numbers, including older entries without difficulty."""
+        if not self.path.exists():
+            return set()
+
+        numbers = set()
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"^\s*(?:-\s*)?([1-9]\d*)\.\s", line)
+            if match:
+                numbers.add(int(match.group(1)))
+        return numbers
+
     # Defining the save function to save memory in memory.md file
     def save(self, entry: str) -> str:
         """Append one concise bullet entry and return the saved text."""
@@ -75,8 +87,16 @@ class MemoryStore:
 
     @classmethod
     def _clean_problem_entry(cls, entry: str) -> str:
-        """Require a LeetCode number followed by its problem title for new saves."""
+        """Normalize new entries to 'number. title | Difficulty'."""
         cleaned_entry = cls._clean_entry(entry)
-        if not re.fullmatch(r"[1-9]\d*\. [^\n]+", cleaned_entry):
-            raise ValueError("Use a LeetCode number and title, like '1. Two Sum'.")
-        return cleaned_entry
+        match = re.fullmatch(
+            r"([1-9]\d*)\.\s+([^|\n]+?)\s*\|\s*(easy|medium|hard)",
+            cleaned_entry,
+            re.IGNORECASE,
+        )
+        if not match:
+            raise ValueError("Use a number, title, and difficulty, like '1. Two Sum | Easy'.")
+        title = match.group(2).strip()
+        if not title:
+            raise ValueError("A problem title cannot be empty.")
+        return f"{match.group(1)}. {title} | {match.group(3).title()}"
