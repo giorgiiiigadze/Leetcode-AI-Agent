@@ -1,0 +1,22 @@
+[project]
+name = "leetcodeagent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Giorgi", email = "giobuisness97@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "dotenv>=0.9.9",
+    "openai>=3.26.0",
+    "pathlib>=1.0.1",
+    "rich>=15.0.0",
+]
+
+[project.scripts]
+leetcodeagent = "leetcodeagent:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
