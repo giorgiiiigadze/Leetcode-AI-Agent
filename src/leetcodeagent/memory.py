@@ -32,6 +32,16 @@ class MemoryStore:
                 numbers.add(int(match.group(1)))
         return numbers
 
+    def solved_entries(self) -> list[str]:
+        """Return saved problem lines for history and progress questions."""
+        if not self.path.exists():
+            return []
+        return [
+            line.strip()
+            for line in self.path.read_text(encoding="utf-8").splitlines()
+            if re.match(r"^\s*(?:-\s*)?[1-9]\d*\.\s", line)
+        ]
+
     # Defining the save function to save memory in memory.md file
     def save(self, entry: str) -> str:
         """Append one concise bullet entry and return the saved text."""

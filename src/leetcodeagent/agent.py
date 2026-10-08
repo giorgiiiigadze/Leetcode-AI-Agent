@@ -8,9 +8,10 @@ from openai import OpenAI
 
 from collections.abc import Callable
 
-from .config import DEFAULT_MEMORY_PATH, Settings
+from .config import DEFAULT_HISTORY_PATH, DEFAULT_MEMORY_PATH, Settings
 from .memory import MemoryStore
 from .leetcode_client import LeetCodeClient
+from .practice_history import PracticeHistory, STATUSES
 from .prompts import SYSTEM_PROMPT
 from .problems import Problem, get_random_problem
 
@@ -23,17 +24,25 @@ class LeetcodeAgent:
         *,
         confirm_delete: Callable[[str], bool],
         memory_path: Path = DEFAULT_MEMORY_PATH,
+        history_path: Path = DEFAULT_HISTORY_PATH,
         client: Any | None = None,
         leetcode_client: LeetCodeClient | None = None,
     ) -> None:
         self.client = client or OpenAI(api_key=settings.api_key)
         self.model = settings.model
         self.memory = MemoryStore(memory_path)
+        self.history = PracticeHistory(history_path)
         self.leetcode_client = leetcode_client or LeetCodeClient()
         self.confirm_delete = confirm_delete
         self.previous_response_id: str | None = None
-        self.last_recommended_problem: str | None = None
-        self.last_recommended_problem_details: Problem | None = None
+        self.last_recommended_problem_details = self.history.latest_recommendation()
+        self.last_recommended_problem: str | None = (
+            f"{self.last_recommended_problem_details.number}. "
+            f"{self.last_recommended_problem_details.title} | "
+            f"{self.last_recommended_problem_details.difficulty.title()}"
+            if self.last_recommended_problem_details is not None
+            else None
+        )
         self.recommended_numbers: set[int] = set()
 
     def get_random_problem(self, difficulty: str, topic: str | None = None) -> Problem | None:
@@ -42,7 +51,11 @@ class LeetcodeAgent:
         if difficulty not in {"easy", "medium", "hard"}:
             raise ValueError("Difficulty must be easy, medium, or hard.")
 
-        excluded_numbers = self.memory.solved_numbers() | self.recommended_numbers
+        excluded_numbers = (
+            self.memory.solved_numbers()
+            | self.history.seen_numbers()
+            | self.recommended_numbers
+        )
         candidates = self.leetcode_client.get_candidate_problems(difficulty)
         problem = get_random_problem(candidates, difficulty, excluded_numbers, topic)
         if problem is None:
@@ -50,6 +63,14 @@ class LeetcodeAgent:
             candidates = self.leetcode_client.get_problems(difficulty)
             problem = get_random_problem(candidates, difficulty, excluded_numbers, topic)
         if problem is not None:
+            previous = self.last_recommended_problem_details
+            if (
+                previous is not None
+                and previous.number != problem.number
+                and self.history.current_status(previous.number) == "recommended"
+            ):
+                self.history.record(previous, "skipped")
+            self.history.record(problem, "recommended")
             self.recommended_numbers.add(problem.number)
             self.last_recommended_problem = (
                 f"{problem.number}. {problem.title} | {problem.difficulty.title()}"
@@ -146,6 +167,7 @@ class LeetcodeAgent:
         """Run one of the application's validated tools."""
         if name not in {
             "get_random_problem", "get_problem_link", "mark_solved",
+            "mark_attempted", "skip_problem", "get_practice_history",
             "save_memory", "save_memories", "delete_memory",
         }:
             return json.dumps({"error": f"Unknown tool: {name}"})
@@ -201,14 +223,40 @@ class LeetcodeAgent:
                     return json.dumps({"error": "No verified link found for that problem."})
                 return json.dumps({"number": problem.number, "title": problem.title, "url": problem.url})
 
+            if name == "get_practice_history":
+                status = arguments.get("status")
+                limit = arguments.get("limit", 20)
+                if status is not None and (not isinstance(status, str) or status not in STATUSES):
+                    return json.dumps({"error": "Status must be recommended, skipped, attempted, solved, removed, or null."})
+                if type(limit) is not int or limit < 1 or limit > 50:
+                    return json.dumps({"error": "Limit must be an integer between 1 and 50."})
+                summary = self.history.summary(
+                    self.memory.solved_numbers(), status=status, limit=limit
+                )
+                if status in {None, "solved"}:
+                    summary["solved_memory_entries"] = self.memory.solved_entries()[-limit:]
+                return json.dumps(summary)
+
+            if name in {"mark_attempted", "skip_problem"}:
+                problem = self.last_recommended_problem_details
+                if problem is None:
+                    return json.dumps({"error": "No recently recommended problem to update."})
+                if problem.number in self.memory.solved_numbers():
+                    return json.dumps({"error": "That problem is already recorded as solved."})
+                status = "attempted" if name == "mark_attempted" else "skipped"
+                self.history.record(problem, status)
+                return json.dumps({"message": f"Problem marked {status}.", "number": problem.number})
+
             if name == "mark_solved":
                 problem = self.last_recommended_problem_details
                 if problem is None:
                     return json.dumps({"error": "No recently recommended problem to mark solved."})
                 if problem.number in self.memory.solved_numbers():
+                    self.history.record(problem, "solved")
                     return json.dumps({"message": "Already saved.", "number": problem.number})
                 entry = f"{problem.number}. {problem.title} | {problem.difficulty.title()}"
                 saved_entry = self.memory.save(entry)
+                self.history.record(problem, "solved")
                 return json.dumps({"message": "Problem saved as solved.", "entry": saved_entry})
 
             if name == "save_memories":
@@ -220,6 +268,8 @@ class LeetcodeAgent:
                         {"error": "save_memories requires a nonempty list of entries."}
                     )
                 saved_entries = self.memory.save_many(entries)
+                for saved_entry in saved_entries:
+                    self._record_saved_entry(saved_entry)
                 return json.dumps({"message": "Memories saved.", "entries": saved_entries})
 
             entry = arguments.get("entry")
@@ -228,6 +278,7 @@ class LeetcodeAgent:
 
             if name == "save_memory":
                 saved_entry = self.memory.save(entry)
+                self._record_saved_entry(saved_entry)
                 return json.dumps({"message": "Memory saved.", "entry": saved_entry})
 
             if not self.confirm_delete(entry):
@@ -239,9 +290,20 @@ class LeetcodeAgent:
 
             if not deleted:
                 return json.dumps({"error": "No exact matching memory entry was found."})
+            self.history.record_entry(entry, "removed")
             return json.dumps({"message": "Memory deleted.", "entry": entry.strip()})
         except (ValueError, RuntimeError) as error:
             return json.dumps({"error": str(error)})
+
+    def _record_saved_entry(self, entry: str) -> None:
+        """Mirror a solved memory in history without changing memory's authority."""
+        problem = self.last_recommended_problem_details
+        if problem is not None and entry == (
+            f"{problem.number}. {problem.title} | {problem.difficulty.title()}"
+        ):
+            self.history.record(problem, "solved")
+        else:
+            self.history.record_entry(entry, "solved")
 
     @staticmethod
     def _tools() -> list[dict[str, Any]]:
@@ -286,6 +348,42 @@ class LeetcodeAgent:
                 "description": "Save the most recently recommended verified problem as solved when the user says they solved it.",
                 "parameters": {
                     "type": "object", "properties": {}, "required": [], "additionalProperties": False,
+                },
+                "strict": True,
+            },
+            {
+                "type": "function",
+                "name": "mark_attempted",
+                "description": "Record that the user started or tried the most recently recommended problem, without marking it solved.",
+                "parameters": {
+                    "type": "object", "properties": {}, "required": [], "additionalProperties": False,
+                },
+                "strict": True,
+            },
+            {
+                "type": "function",
+                "name": "skip_problem",
+                "description": "Record that the user is skipping the most recently recommended problem when they are not requesting a replacement at the same time.",
+                "parameters": {
+                    "type": "object", "properties": {}, "required": [], "additionalProperties": False,
+                },
+                "strict": True,
+            },
+            {
+                "type": "function",
+                "name": "get_practice_history",
+                "description": "Read local practice history and current status counts. Filter by status when the user asks which problems were skipped, attempted, recommended, or solved.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": ["string", "null"],
+                            "enum": ["recommended", "skipped", "attempted", "solved", "removed", None],
+                        },
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["status", "limit"],
+                    "additionalProperties": False,
                 },
                 "strict": True,
             },

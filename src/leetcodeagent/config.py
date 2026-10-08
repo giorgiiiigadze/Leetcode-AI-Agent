@@ -7,6 +7,7 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).parent
 PROMPT_FILE = PROJECT_ROOT / "prompts"
 DEFAULT_MEMORY_PATH = PROJECT_ROOT / "memory.md"
+DEFAULT_HISTORY_PATH = PROJECT_ROOT / "practice_history.jsonl"
 
 
 class Settings:

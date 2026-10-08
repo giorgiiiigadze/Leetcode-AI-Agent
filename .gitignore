@@ -11,3 +11,7 @@ wheels/
 
 # Local secrets
 .env
+
+# Personal practice data
+src/leetcodeagent/memory.md
+src/leetcodeagent/practice_history.jsonl

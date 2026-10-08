@@ -30,6 +30,8 @@ To send several lines of code, type `/paste` (or `/paste` followed by your quest
 Give me a random LeetCode problem.
 I'd like an easy array problem.
 Skip that one and give me another.
+I tried that problem but got stuck.
+What problems have I skipped recently?
 What's the link to the last problem?
 I solved it.
 Which problems have I solved?
@@ -42,6 +44,7 @@ For a first recommendation without a difficulty, the coach asks whether you want
 
 - Public problem metadata comes from LeetCode's website GraphQL endpoint. The agent filters out paid problems and problems already recorded as solved, then uses NumPy to choose a candidate.
 - Solved problems are stored locally in `src/leetcodeagent/memory.md`, one per line, for example `- 1. Two Sum | Easy`. The coach does not read your LeetCode account or submission history.
+- Recommendations, skips, attempts, and solves are recorded in the local `src/leetcodeagent/practice_history.jsonl` file. It is ignored by Git. Previously recommended problems are not picked again after restarting the app; `memory.md` remains the authority for what is solved.
 - The model decides when to call the recommendation, link, and memory tools. Deleting a memory entry asks for terminal confirmation.
 
 LeetCode's website endpoint is undocumented and may change or reject requests. A network connection is needed for fresh recommendations, and an OpenAI API key is needed for chat.
