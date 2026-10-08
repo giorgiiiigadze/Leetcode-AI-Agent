@@ -1,19 +1,13 @@
 from .agent import LeetcodeAgent
 from .config import settings
+from .terminal_ui import print_coach_answer, read_user_message
 
 from rich.console import Console
-# from rich.markdown import Markdown
 from rich.prompt import Confirm
 
 EXIT_COMMANDS = {"exit", "quit", "q"}
 
 console = Console()
-
-
-# def _print_coach_answer(answer: str, output: Console = console) -> None:
-#     """Render the model's Markdown formatting in the terminal."""
-#     output.print("\n[bold green]Coach:[/]")
-#     output.print(Markdown(answer))
 
 
 def main() -> None:
@@ -39,7 +33,7 @@ def main() -> None:
 
     while True:
         try:
-            question = console.input("\n[bold]You:[/] ").strip()
+            question = read_user_message(console)
         except (EOFError, KeyboardInterrupt):
             console.print("\nBye!")
             return
@@ -53,8 +47,7 @@ def main() -> None:
         try:
             with status:
                 answer = agent.ask(question)
-            # _print_coach_answer(answer)
-            console.print("\n[bold green]Coach:[/]", answer)
+            print_coach_answer(console, answer)
         except (EOFError, KeyboardInterrupt):
             console.print("\nBye!")
             return

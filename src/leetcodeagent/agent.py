@@ -34,6 +34,7 @@ class LeetcodeAgent:
         self.previous_response_id: str | None = None
         self.last_recommended_problem: str | None = None
         self.last_recommended_problem_details: Problem | None = None
+        self.recommended_numbers: set[int] = set()
 
     def get_random_problem(self, difficulty: str, topic: str | None = None) -> Problem | None:
         """Pick a real public LeetCode problem absent from memory.md."""
@@ -41,16 +42,15 @@ class LeetcodeAgent:
         if difficulty not in {"easy", "medium", "hard"}:
             raise ValueError("Difficulty must be easy, medium, or hard.")
 
-        solved_numbers = self.memory.solved_numbers()
-        if self.last_recommended_problem_details is not None:
-            solved_numbers.add(self.last_recommended_problem_details.number)
+        excluded_numbers = self.memory.solved_numbers() | self.recommended_numbers
         candidates = self.leetcode_client.get_candidate_problems(difficulty)
-        problem = get_random_problem(candidates, difficulty, solved_numbers, topic)
+        problem = get_random_problem(candidates, difficulty, excluded_numbers, topic)
         if problem is None:
-            # Rare filters can miss the sampled page; search the full catalog then.
+            # The sampled page may be exhausted even when other pages are not.
             candidates = self.leetcode_client.get_problems(difficulty)
-            problem = get_random_problem(candidates, difficulty, solved_numbers, topic)
+            problem = get_random_problem(candidates, difficulty, excluded_numbers, topic)
         if problem is not None:
+            self.recommended_numbers.add(problem.number)
             self.last_recommended_problem = (
                 f"{problem.number}. {problem.title} | {problem.difficulty.title()}"
             )
@@ -73,7 +73,8 @@ class LeetcodeAgent:
             parallel_tool_calls=False,
         )
 
-        verified_url: str | None = None
+        selected_problem: Problem | None = None
+        linked_problem: dict[str, Any] | None = None
         for _ in range(10):
             function_calls = [
                 item for item in response.output if item.type == "function_call"
@@ -83,8 +84,12 @@ class LeetcodeAgent:
             tool_outputs = []
             for call in function_calls:
                 output = self._run_tool(call.name, call.arguments)
-                if call.name in {"get_random_problem", "get_problem_link"}:
-                    verified_url = json.loads(output).get("url") or verified_url
+                if call.name == "get_random_problem" and json.loads(output).get("url"):
+                    selected_problem = self.last_recommended_problem_details
+                elif call.name == "get_problem_link":
+                    result = json.loads(output)
+                    if result.get("url"):
+                        linked_problem = result
                 tool_outputs.append({
                     "type": "function_call_output",
                     "call_id": call.call_id,
@@ -104,12 +109,26 @@ class LeetcodeAgent:
             raise RuntimeError("The agent made too many tool calls in one turn.")
 
         answer = response.output_text.strip()
-        if not answer:
+        if not answer and selected_problem is None and linked_problem is None:
             raise RuntimeError("The model returned no text response.")
-        if verified_url and verified_url not in answer:
-            answer = f"{answer}\n{verified_url}"
+        if selected_problem is not None:
+            # The visible recommendation must match the verified tool selection.
+            answer = self._format_recommendation(selected_problem)
+        elif linked_problem is not None:
+            answer = (
+                f"{linked_problem['number']}. {linked_problem['title']}: "
+                f"{linked_problem['url']}"
+            )
         self.previous_response_id = response.id
         return answer
+
+    @staticmethod
+    def _format_recommendation(problem: Problem) -> str:
+        primary_topic = problem.topic.split(",", 1)[0]
+        return (
+            f"Try {problem.number}. {problem.title} — "
+            f"{problem.difficulty.title()}, {primary_topic}.\n{problem.url}"
+        )
 
     def _build_input(self, question: str) -> str:
         return (
@@ -117,6 +136,7 @@ class LeetcodeAgent:
             f"{self.memory.read()}\n"
             "---\n\n"
             f"Most recently recommended problem: {self.last_recommended_problem or 'none'}\n\n"
+            f"Problem numbers already recommended in this chat: {sorted(self.recommended_numbers)}\n\n"
             f"Last recommendation difficulty: "
             f"{self.last_recommended_problem_details.difficulty if self.last_recommended_problem_details else 'none'}\n\n"
             f"User question: {question}"
