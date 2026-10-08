@@ -44,8 +44,12 @@ class LeetcodeAgent:
         solved_numbers = self.memory.solved_numbers()
         if self.last_recommended_problem_details is not None:
             solved_numbers.add(self.last_recommended_problem_details.number)
-        candidates = self.leetcode_client.get_problems(difficulty)
+        candidates = self.leetcode_client.get_candidate_problems(difficulty)
         problem = get_random_problem(candidates, difficulty, solved_numbers, topic)
+        if problem is None:
+            # Rare filters can miss the sampled page; search the full catalog then.
+            candidates = self.leetcode_client.get_problems(difficulty)
+            problem = get_random_problem(candidates, difficulty, solved_numbers, topic)
         if problem is not None:
             self.last_recommended_problem = (
                 f"{problem.number}. {problem.title} | {problem.difficulty.title()}"
