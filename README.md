@@ -22,6 +22,8 @@ Requires Python 3.13+, [uv](https://docs.astral.sh/uv/), and an OpenAI API key.
 
 Type `exit`, `quit`, or `q` to leave the chat.
 
+To send several lines of code, type `/paste` (or `/paste` followed by your question), paste the code, and enter `/end` on its own line. The coach displays your code in a panel and sends it as one message. You can also paste code wrapped in Markdown fences (three backticks and a language label). Code blocks in the coach's replies appear in syntax-highlighted panels.
+
 ## Example prompts
 
 ```text
